@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Voice-Expense Pro</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { primary: '#3b82f6' }
+        }
+      }
+    }
+  </script>
+
+  <!-- React & ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body {
+      background-color: #f8fafc;
+      color: #0f172a;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overscroll-behavior-y: none;
+    }
+    .mic-pulse { animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel" data-type="module">
+    const { useState, useEffect, useRef } = React;
+
+    // --- UTILS ---
+    const STORAGE_KEY = 'voice_expenses_data';
+    const SETTINGS_KEY = 'voice_expenses_settings';
+
+    const storage = {
+      getExpenses: () => {
+        try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } 
+        catch (e) { return []; }
+      },
+      saveExpense: (expense) => {
+        const expenses = storage.getExpenses();
+        expenses.push(expense);
+        expenses.sort((a, b) => b.timestamp - a.timestamp);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
+      },
+      markAsSynced: (ids) => {
+        const expenses = storage.getExpenses();
+        const updated = expenses.map(exp => ids.includes(exp.id) ? { ...exp, synced: true } : exp);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      },
+      getPendingSync: () => storage.getExpenses().filter(exp => !exp.synced),
+      getSettings: () => {
+        try { return JSON.parse(localStorage.getItem(SETTINGS_KEY)) || { gasUrl: 'https://script.google.com/macros/s/AKfycbzHanztXuYupAEKpfP-hI61L77bl47hiwzeqUiznGyMWm0pEUxiIbtaZhQLQ8J_c1TE/exec' }; } 
+        catch (e) { return { gasUrl: '' }; }
+      },
+      saveSettings: (settings) => localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+    };
+
+    const CATEGORIES = ['Supermercado', 'Placer', 'Comida', 'Servicios', 'Otros'];
+
+    function parseDate(dateStr) {
+      const normalized = dateStr.toLowerCase().trim();
+      const today = new Date();
+      if (normalized === 'hoy') return today.toISOString().split('T')[0];
+      if (normalized === 'ayer') {
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        return yesterday.toISOString().split('T')[0];
+      }
+      return today.toISOString().split('T')[0];
+    }
+
+    function parseVoiceInput(text) {
+      const regex = /fecha (.*?) gasté (\d+(?:[.,]\d+)?) pesos en (.*?), con el tipo de gasto (.*)/i;
+      const match = text.match(regex);
+      if (match) {
+        return {
+          date: parseDate(match[1]),
+          amount: parseFloat(match[2].replace(',', '.')),
+          description: match[3].trim(),
+          category: CATEGORIES.find(c => match[4].toLowerCase().includes(c.toLowerCase())) || 'Otros',
+          originalText: text
+        };
+      }
+      const amountMatch = text.match(/(\d+(?:[.,]\d+)?)/);
+      return {
+        date: parseDate('hoy'),
+        amount: amountMatch ? parseFloat(amountMatch[1].replace(',', '.')) : null,
+        description: text,
+        category: 'Otros',
+        originalText: text
+      };
+    }
+
+    const syncService = {
+      syncPending: async () => {
+        if (!navigator.onLine) return false;
+        const pending = storage.getPendingSync();
+        if (pending.length === 0) return true;
+        const settings = storage.getSettings();
+        if (!settings.gasUrl) return false;
+
+        try {
+          const response = await fetch(settings.gasUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'syncExpenses', data: pending })
+          });
+          if (response.ok) {
+            storage.markAsSynced(pending.map(p => p.id));
+            return true;
+          }
+          return false;
+        } catch (e) { return false; }
+      }
+    };
+
+    // --- ICONS ---
+    const IconMic = () => <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg>;
+    const IconSettings = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
+    const IconCheck = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>;
+    const IconCloudOff = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m2 2 20 20"/><path d="M5.78 5.78a7 7 0 0 0 9.44 9.44"/><path d="M20.16 20.16a7 7 0 0 1-13.38-4A7 7 0 0 1 9.9 2.5"/></svg>;
+
+    // --- COMPONENTS ---
+    const Dashboard = ({ expenses }) => {
+      const today = new Date().toISOString().split('T')[0];
+      const monthly = expenses.reduce((s, e) => s + e.amount, 0); // Simplified monthly
+      const daily = expenses.filter(e => e.date === today).reduce((s, e) => s + e.amount, 0);
+      return (
+        <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100">
+            <span className="text-sm text-slate-500 font-medium">Total Mes</span>
+            <div className="text-2xl font-bold text-slate-800 mt-2">${monthly.toFixed(2)}</div>
+          </div>
+          <div className="bg-blue-50 rounded-2xl p-4 shadow-sm border border-blue-100">
+            <span className="text-sm text-blue-600 font-medium">Gasto Diario</span>
+            <div className="text-2xl font-bold text-blue-600 mt-2">${daily.toFixed(2)}</div>
+          </div>
+        </div>
+      );
+    };
+
+    const ExpenseList = ({ expenses }) => {
+      if (!expenses.length) return <div className="text-center py-10 text-slate-400">No hay gastos aún.</div>;
+      return (
+        <div className="space-y-3">
+          {expenses.map(e => (
+            <div key={e.id} className="bg-white rounded-xl p-4 shadow-sm border border-slate-50 flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-slate-800 capitalize">{e.description || e.category}</p>
+                <div className="text-xs text-slate-400 mt-1">{e.date} • {e.category}</div>
+              </div>
+              <div className="flex flex-col items-end">
+                <span className="font-bold text-slate-700">${e.amount.toFixed(2)}</span>
+                <div className="mt-1">{e.synced ? <IconCheck /> : <IconCloudOff />}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    const VoiceMicFAB = ({ onSave }) => {
+      const [isRecording, setIsRecording] = useState(false);
+      const [parsedData, setParsedData] = useState(null);
+      const recognitionRef = useRef(null);
+
+      useEffect(() => {
+        const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (Speech) {
+          recognitionRef.current = new Speech();
+          recognitionRef.current.lang = 'es-AR';
+          recognitionRef.current.onstart = () => setIsRecording(true);
+          recognitionRef.current.onresult = (e) => setParsedData(parseVoiceInput(e.results[0][0].transcript));
+          recognitionRef.current.onerror = () => setIsRecording(false);
+          recognitionRef.current.onend = () => setIsRecording(false);
+        }
+      }, []);
+
+      return (
+        <>
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40">
+            <button
+              onClick={() => isRecording ? recognitionRef.current.stop() : recognitionRef.current.start()}
+              className={`flex items-center justify-center w-16 h-16 rounded-full shadow-lg text-white ${isRecording ? 'bg-red-500 mic-pulse' : 'bg-blue-500'}`}
+            >
+              <IconMic />
+            </button>
+          </div>
+          {parsedData && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden">
+                <div className="p-4 bg-blue-500 text-white font-bold text-center">Confirmar Gasto</div>
+                <div className="p-6 text-sm grid grid-cols-2 gap-4">
+                  <div className="text-slate-500">Monto:</div><div className="font-bold">${parsedData.amount}</div>
+                  <div className="text-slate-500">Desc:</div><div>{parsedData.description}</div>
+                  <div className="text-slate-500">Cat:</div><div>{parsedData.category}</div>
+                </div>
+                <div className="flex border-t">
+                  <button onClick={() => setParsedData(null)} className="flex-1 py-3 text-slate-500">Cancelar</button>
+                  <button onClick={() => { onSave(parsedData); setParsedData(null); }} className="flex-1 py-3 text-blue-600 font-bold border-l">Guardar</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      );
+    };
+
+    const App = () => {
+      const [expenses, setExpenses] = useState([]);
+      const [showSettings, setShowSettings] = useState(false);
+      const [gasUrl, setGasUrl] = useState('');
+
+      useEffect(() => {
+        setExpenses(storage.getExpenses());
+        setGasUrl(storage.getSettings().gasUrl);
+        window.addEventListener('online', async () => {
+          if (await syncService.syncPending()) setExpenses(storage.getExpenses());
+        });
+      }, []);
+
+      const handleSave = async (data) => {
+        storage.saveExpense({ id: Date.now().toString(), synced: false, timestamp: Date.now(), ...data });
+        setExpenses(storage.getExpenses());
+        if (await syncService.syncPending()) setExpenses(storage.getExpenses());
+      };
+
+      return (
+        <div className="min-h-screen max-w-md mx-auto bg-slate-50 flex flex-col relative pb-28 sm:border-x">
+          <header className="bg-white px-5 py-4 shadow-sm flex items-center justify-between">
+            <h1 className="text-xl font-extrabold text-slate-800">Voice-Expense<span className="text-blue-500">.Pro</span></h1>
+            <button onClick={() => setShowSettings(true)} className="text-slate-400"><IconSettings /></button>
+          </header>
+          <main className="p-5 flex-1">
+            <Dashboard expenses={expenses} />
+            <h2 className="text-lg font-bold text-slate-800 mb-4">Tus Gastos</h2>
+            <ExpenseList expenses={expenses} />
+          </main>
+          <VoiceMicFAB onSave={handleSave} />
+
+          {showSettings && (
+            <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl w-full max-w-md p-6">
+                <h2 className="font-bold text-lg mb-4">Ajustes</h2>
+                <textarea 
+                  className="w-full border p-3 rounded mb-4 text-sm" rows="3" 
+                  value={gasUrl} onChange={e => setGasUrl(e.target.value)}
+                />
+                <button 
+                  onClick={() => { storage.saveSettings({ gasUrl }); setShowSettings(false); }}
+                  className="w-full bg-slate-900 text-white py-3 rounded-xl"
+                >Guardar</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
