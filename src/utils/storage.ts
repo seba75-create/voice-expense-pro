@@ -77,7 +77,7 @@ export const storage = {
       const localExpenses = storage.getExpenses();
       const pending = localExpenses.filter(e => !e.synced);
 
-      // Merge: take all remote expenses and add any local pending ones
+      // Merge: take all remote expenses and add any local pending ones PRUEBA
       // This ensures we don't lose data that hasn't been synced yet
       const merged = [...pending];
 
