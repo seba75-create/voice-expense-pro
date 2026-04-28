@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { ExpenseList } from './components/ExpenseList';
