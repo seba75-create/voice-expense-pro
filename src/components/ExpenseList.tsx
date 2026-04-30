@@ -27,7 +27,9 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUpdate, on
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const endOfToday = startOfToday + 24 * 60 * 60 * 1000;
   
-  const todayExpenses = expenses.filter(e => e.timestamp >= startOfToday && e.timestamp < endOfToday);
+  const todayExpenses = expenses
+    .filter(e => e.timestamp >= startOfToday && e.timestamp < endOfToday)
+    .sort((a, b) => b.timestamp - a.timestamp);
 
   const startEditing = (expense: Expense) => {
     setEditingId(expense.id);

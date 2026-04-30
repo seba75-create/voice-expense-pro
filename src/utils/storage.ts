@@ -82,10 +82,9 @@ export const storage = {
       const merged = [...pending];
 
       remoteExpenses.forEach(remote => {
-        // Validación más flexible de la fecha
+        // Normalización de fecha (YYYY-MM-DD)
         let date = remote.date;
         if (typeof date === 'string' && date.includes('/')) {
-          // Convertir DD/MM/YYYY a YYYY-MM-DD si es necesario
           const parts = date.split('/');
           if (parts.length === 3) {
             if (parts[2].length === 4) date = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
@@ -93,14 +92,51 @@ export const storage = {
           }
         }
 
-        // Simple check to avoid duplicates if possible (by date, amount and desc)
-        const exists = merged.some(m =>
-          m.date === date &&
-          m.amount === remote.amount &&
-          m.description === remote.description
+        // Búsqueda flexible de timestamp en la planilla
+        let timestamp = remote.timestamp;
+        const possibleKeys = ['Fecha Registro', 'Fecha de Registro', 'fechaRegistro', 'Timestamp', 'Fecha'];
+        
+        for (const key of possibleKeys) {
+          const val = (remote as any)[key];
+          if (val && typeof val === 'string' && val.includes(':')) {
+            try {
+              const [dPart, tPart] = val.split(' ');
+              const [d, m, y] = dPart.split(dPart.includes('/') ? '/' : '-');
+              const [h, min, s] = tPart.split(':');
+              timestamp = new Date(
+                parseInt(y), 
+                parseInt(m) - 1, 
+                parseInt(d), 
+                parseInt(h) || 0, 
+                parseInt(min) || 0, 
+                parseInt(s) || 0
+              ).getTime();
+              if (!isNaN(timestamp)) break;
+            } catch (e) {}
+          }
+        }
+
+        if (!timestamp || isNaN(timestamp)) timestamp = Date.now();
+
+        // Usar ID para evitar duplicados si existe, si no, usar combinación de datos
+        const remoteId = remote.id || (remote as any).ID;
+        const existingIndex = merged.findIndex(m => 
+          (remoteId && m.id === remoteId) || 
+          (!remoteId && m.date === date && m.amount === remote.amount && m.description === remote.description)
         );
-        if (!exists) {
-          merged.push({ ...remote, date, synced: true });
+
+        const normalizedRemote = { 
+          ...remote, 
+          id: remoteId || remote.id || crypto.randomUUID(),
+          date, 
+          timestamp, 
+          synced: true 
+        };
+
+        if (existingIndex !== -1) {
+          merged[existingIndex] = normalizedRemote;
+        } else {
+          merged.push(normalizedRemote);
         }
       });
 
