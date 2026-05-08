@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/vite-env.d.ts","./src/components/dashboard.tsx","./src/components/expenselist.tsx","./src/components/settings.tsx","./src/components/voicemicfab.tsx","./src/utils/storage.ts","./src/utils/syncservice.ts","./src/utils/voiceparser.ts"],"version":"5.9.3"}
