@@ -7,17 +7,88 @@ export const storage = {
   getExpenses: (): Expense[] => {
     try {
       const data = localStorage.getItem(STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
+      const expenses = data ? JSON.parse(data) : [];
+      // Always normalize on read to fix any legacy broken data
+      return expenses.map(storage.normalizeExpense);
     } catch (e) {
       console.error('Error reading from storage', e);
       return [];
     }
   },
 
+  normalizeExpense: (exp: any): Expense => {
+    // 1. Find a reliable timestamp first
+    let timestamp = exp.timestamp;
+    const possibleKeys = ['Fecha Registro', 'Fecha de Registro', 'fechaRegistro', 'Timestamp', 'Fecha', 'fecha'];
+    
+    for (const key of possibleKeys) {
+      const val = (exp as any)[key];
+      if (val) {
+        // Handle DD/MM/YYYY HH:MM:SS
+        if (typeof val === 'string' && val.includes('/') && val.includes(':')) {
+          const [dPart, tPart] = val.split(' ');
+          const [d, m, y] = dPart.split('/');
+          const [h, min, s] = tPart.split(':');
+          const dObj = new Date(parseInt(y), parseInt(m) - 1, parseInt(d), parseInt(h) || 0, parseInt(min) || 0, parseInt(s) || 0);
+          if (!isNaN(dObj.getTime())) {
+            timestamp = dObj.getTime();
+            break;
+          }
+        }
+        const parsed = new Date(val);
+        if (!isNaN(parsed.getTime())) {
+          timestamp = parsed.getTime();
+          break;
+        }
+      }
+    }
+    if (!timestamp || isNaN(timestamp)) timestamp = Date.now();
+
+    // 2. Normalize Date (YYYY-MM-DD)
+    let date = exp.date || (exp as any).Fecha || (exp as any).fecha;
+    
+    // If date is missing, invalid format, or a weird string like "Tue Apr..."
+    if (!date || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      // Try to parse whatever we have in 'date' first
+      const parsedDate = new Date(date || timestamp);
+      if (!isNaN(parsedDate.getTime())) {
+        date = `${parsedDate.getFullYear()}-${String(parsedDate.getMonth() + 1).padStart(2, '0')}-${String(parsedDate.getDate()).padStart(2, '0')}`;
+      } else {
+        // Fallback to today ONLY if we have absolutely nothing better
+        const today = new Date();
+        date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      }
+    }
+
+    // 3. Normalize Amount (Handle 1.000,00 € -> 1000.00)
+    let amount = exp.amount !== undefined ? exp.amount : (exp as any).Monto || (exp as any).monto;
+    if (typeof amount === 'string') {
+      let s = amount.replace(/[€$]/g, '').replace(/\s/g, '').trim();
+      if (s.includes('.') && s.includes(',')) {
+        s = s.replace(/\./g, '').replace(',', '.');
+      } else if (s.includes(',')) {
+        s = s.replace(',', '.');
+      }
+      amount = parseFloat(s);
+    }
+    if (amount === undefined || isNaN(amount)) amount = 0;
+
+    return {
+      ...exp,
+      id: exp.id || (exp as any).ID || exp.id || crypto.randomUUID(),
+      date,
+      amount,
+      timestamp,
+      description: exp.description || (exp as any).Descripción || (exp as any).descripción || '',
+      category: exp.category || (exp as any).Categoría || (exp as any).categoría || 'Otros',
+      synced: exp.synced ?? true
+    };
+  },
+
   saveExpense: (expense: Expense): void => {
     try {
       const expenses = storage.getExpenses();
-      expenses.push(expense);
+      expenses.push(storage.normalizeExpense(expense));
       // Sort by timestamp descending
       expenses.sort((a, b) => b.timestamp - a.timestamp);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
@@ -39,7 +110,7 @@ export const storage = {
       const expenses = storage.getExpenses();
       const index = expenses.findIndex(e => e.id === updated.id);
       if (index !== -1) {
-        expenses[index] = updated;
+        expenses[index] = storage.normalizeExpense(updated);
         localStorage.setItem(STORAGE_KEY, JSON.stringify(expenses));
       }
     } catch (e) {
@@ -76,67 +147,20 @@ export const storage = {
     try {
       const localExpenses = storage.getExpenses();
       const pending = localExpenses.filter(e => !e.synced);
-
-      // Merge: take all remote expenses and add any local pending ones PRUEBA
-      // This ensures we don't lose data that hasn't been synced yet
       const merged = [...pending];
 
       remoteExpenses.forEach(remote => {
-        // Normalización de fecha (YYYY-MM-DD)
-        let date = remote.date;
-        if (typeof date === 'string' && date.includes('/')) {
-          const parts = date.split('/');
-          if (parts.length === 3) {
-            if (parts[2].length === 4) date = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
-            else if (parts[0].length === 4) date = `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
-          }
-        }
-
-        // Búsqueda flexible de timestamp en la planilla
-        let timestamp = remote.timestamp;
-        const possibleKeys = ['Fecha Registro', 'Fecha de Registro', 'fechaRegistro', 'Timestamp', 'Fecha'];
+        const normalizedRemote = storage.normalizeExpense(remote);
         
-        for (const key of possibleKeys) {
-          const val = (remote as any)[key];
-          if (val && typeof val === 'string' && val.includes(':')) {
-            try {
-              const [dPart, tPart] = val.split(' ');
-              const [d, m, y] = dPart.split(dPart.includes('/') ? '/' : '-');
-              const [h, min, s] = tPart.split(':');
-              timestamp = new Date(
-                parseInt(y), 
-                parseInt(m) - 1, 
-                parseInt(d), 
-                parseInt(h) || 0, 
-                parseInt(min) || 0, 
-                parseInt(s) || 0
-              ).getTime();
-              if (!isNaN(timestamp)) break;
-            } catch (e) {}
-          }
-        }
-
-        if (!timestamp || isNaN(timestamp)) timestamp = Date.now();
-
-        // Usar ID para evitar duplicados si existe, si no, usar combinación de datos
-        const remoteId = remote.id || (remote as any).ID;
         const existingIndex = merged.findIndex(m => 
-          (remoteId && m.id === remoteId) || 
-          (!remoteId && m.date === date && m.amount === remote.amount && m.description === remote.description)
+          m.id === normalizedRemote.id || 
+          (m.date === normalizedRemote.date && m.amount === normalizedRemote.amount && m.description === normalizedRemote.description)
         );
 
-        const normalizedRemote = { 
-          ...remote, 
-          id: remoteId || remote.id || crypto.randomUUID(),
-          date, 
-          timestamp, 
-          synced: true 
-        };
-
         if (existingIndex !== -1) {
-          merged[existingIndex] = normalizedRemote;
+          merged[existingIndex] = { ...normalizedRemote, synced: true };
         } else {
-          merged.push(normalizedRemote);
+          merged.push({ ...normalizedRemote, synced: true });
         }
       });
 

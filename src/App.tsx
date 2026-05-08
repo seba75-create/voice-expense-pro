@@ -109,7 +109,7 @@ function App() {
   return (
     <div className="min-h-screen max-w-md mx-auto bg-slate-50 flex flex-col relative overflow-hidden shadow-2xl sm:border-x sm:border-slate-200">
       <header className="bg-white px-5 py-4 shadow-sm flex items-center justify-between z-10 relative">
-        <h1 className="text-xl font-extrabold text-slate-800 tracking-tight">Voice-Expense<span className="text-primary">.Pro</span></h1>
+        <h1 className="text-xl font-extrabold text-slate-800 tracking-tight">Gastos</h1>
         <button
           onClick={() => setShowSettings(true)}
           className="p-2 text-slate-400 hover:text-slate-700 bg-slate-50 rounded-full transition-colors"
@@ -124,7 +124,11 @@ function App() {
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-800">Tus Gastos</h2>
           <span className="text-xs font-medium text-slate-400 bg-slate-200/50 px-2 py-1 rounded-md">
-            {expenses.length} registros
+            {expenses.filter(e => {
+              const now = new Date();
+              const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+              return e.date === todayStr;
+            }).length} registros
           </span>
         </div>
 

@@ -24,11 +24,10 @@ export const ExpenseList: React.FC<ExpenseListProps> = ({ expenses, onUpdate, on
   const [editForm, setEditForm] = useState<Partial<Expense>>({});
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const endOfToday = startOfToday + 24 * 60 * 60 * 1000;
+  const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   
   const todayExpenses = expenses
-    .filter(e => e.timestamp >= startOfToday && e.timestamp < endOfToday)
+    .filter(e => e.date === todayStr)
     .sort((a, b) => b.timestamp - a.timestamp);
 
   const startEditing = (expense: Expense) => {

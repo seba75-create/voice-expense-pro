@@ -69,20 +69,33 @@ function normalizeCategory(catStr: string): string {
 export function parseVoiceInput(text: string): ParsedData {
   console.log('Parsing voice input:', text);
 
-  // Enhanced flexible regex to handle optional $ symbol and multiple variations:
-  // 1. (Optional) Date prefix
-  // 2. Main action: "gasté" or "gaste"
-  // 3. (Optional) $ symbol: \$?
-  // 4. Amount: (\d+(?:[.,]\d+)?)
-  // 5. (Optional) "pesos"
-  // 6. Connector: "en"
-  // 7. Description and Category logic
-  const regex = /^(.*?)\s*gast[eé]\s+\$?\s*(\d+(?:[.,]\d+)?)(?:\s+pesos)?\s+en\s+(.*?)(?:\s+con\s+(?:el\s+)?tipo\s+de\s+gasto\s+(.*)|$)/i;
-  const match = text.match(regex);
+  // New preferred format: "[monto] en [detalle], categoria [categoria]"
+  // Also supports variations like:
+  // - "500 en pan"
+  // - "$500 pesos en pan categoria Comida"
+  // - "500 en pan, categoria Otros"
+  const newFormatRegex = /^\$?\s*(\d+(?:[.,]\d+)?)(?:\s+pesos)?\s+en\s+(.*?)(?:(?:,|\s+)?\s*categor[ií]a\s+(.*)|$)/i;
+  
+  // Legacy/Full format: "(fecha) gasté [monto] en [detalle] con tipo de gasto [categoria]"
+  const legacyRegex = /^(.*?)\s*gast[eé]\s+\$?\s*(\d+(?:[.,]\d+)?)(?:\s+pesos)?\s+en\s+(.*?)(?:\s+con\s+(?:el\s+)?tipo\s+de\s+gasto\s+(.*)|$)/i;
 
+  let match = text.match(newFormatRegex);
+  
+  if (match) {
+    const [, amountRaw, descRaw, categoryRaw] = match;
+    return {
+      date: parseDate('hoy'), // New format doesn't explicitly include date, default to today
+      amount: parseFloat(amountRaw.replace(',', '.')),
+      description: descRaw.trim(),
+      category: normalizeCategory(categoryRaw || 'Otros'),
+      originalText: text
+    };
+  }
+
+  // Fallback to legacy regex
+  match = text.match(legacyRegex);
   if (match) {
     const [, dateRaw, amountRaw, descRaw, categoryRaw] = match;
-
     return {
       date: parseDate(dateRaw || 'hoy'),
       amount: parseFloat(amountRaw.replace(',', '.')),
@@ -92,8 +105,8 @@ export function parseVoiceInput(text: string): ParsedData {
     };
   }
 
-  // Smarter Fallback: Try to extract amount even if it has a $
-  const fallbackAmountRegex = /gast[eé]\s+\$?\s*(\d+(?:[.,]\d+)?)/i;
+  // Last resort: Smarter Fallback
+  const fallbackAmountRegex = /(?:gast[eé]|\$)\s*(\d+(?:[.,]\d+)?)/i;
   const amountMatch = text.match(fallbackAmountRegex);
   const amount = amountMatch ? parseFloat(amountMatch[1].replace(',', '.')) : null;
 

@@ -7,28 +7,23 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ expenses }) => {
   const now = new Date();
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
   
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const endOfToday = startOfToday + 24 * 60 * 60 * 1000;
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const todayStr = `${year}-${month}-${day}`;
+  const monthStr = `${year}-${month}`;
 
-  const todayExpenses = expenses.filter(e => e.timestamp >= startOfToday && e.timestamp < endOfToday);
+  const todayExpenses = expenses.filter(e => e.date === todayStr);
 
   const monthlyTotal = expenses
-    .filter(e => {
-      const d = new Date(e.timestamp);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    })
+    .filter(e => e.date.startsWith(monthStr))
     .reduce((sum, e) => sum + e.amount, 0);
 
   const dailyTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
 
   const monthlyByCategory = expenses
-    .filter(e => {
-      const d = new Date(e.timestamp);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    })
+    .filter(e => e.date.startsWith(monthStr))
     .reduce((acc, e) => {
       acc[e.category] = (acc[e.category] || 0) + e.amount;
       return acc;
